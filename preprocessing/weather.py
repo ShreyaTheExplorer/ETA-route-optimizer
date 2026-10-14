@@ -17,6 +17,7 @@ import pathlib
 import sys
 from datetime import datetime, timezone
 
+import numpy as np
 import pandas as pd
 import requests
 import yaml
@@ -74,65 +75,99 @@ def download_weather(save_path: pathlib.Path) -> pd.DataFrame:
     return df
 
 
-def load_weather(cfg: dict) -> pd.DataFrame:
+_weather_cache: pd.DataFrame | None = None
+_medians_cache: tuple[pd.DataFrame, pd.Series] | None = None
+
+
+def load_weather(cfg: dict | None = None) -> pd.DataFrame:
     """
-    Load weather from disk (downloading first if not present).
-    Returns DataFrame with columns: pickup_hour, temperature_2m,
-    precipitation, wind_speed_10m.
+    Load weather from models/artifacts/ (runtime) or data/raw/ (training/fallback).
+    Results are cached in memory for zero-overhead inference.
+    Returns DataFrame with columns: pickup_hour, temperature_2m, precipitation, wind_speed_10m.
     """
+    global _weather_cache
+    if _weather_cache is not None:
+        return _weather_cache
+
     project_root = pathlib.Path(__file__).parent.parent
-    weather_path = project_root / cfg["paths"]["raw_weather"]
 
-    if not weather_path.exists():
-        print(f"[weather] File not found at {weather_path}. Downloading ...")
-        download_weather(weather_path)
+    # Check models/artifacts first so runtime/Docker has no dependency on data/
+    candidates = []
+    if cfg and "paths" in cfg:
+        if "weather_artifact" in cfg["paths"]:
+            candidates.append(project_root / cfg["paths"]["weather_artifact"])
+        if "raw_weather" in cfg["paths"]:
+            candidates.append(project_root / cfg["paths"]["raw_weather"])
 
-    df = pd.read_csv(weather_path, parse_dates=["pickup_hour"])
-    return df
+    candidates.extend([
+        project_root / "models" / "artifacts" / "weather_hourly.parquet",
+        project_root / "models" / "artifacts" / "weather_nyc_2016.csv",
+        project_root / "data" / "raw" / "weather_nyc_2016.csv",
+    ])
+
+    for path in candidates:
+        if path.exists():
+            if path.suffix == ".parquet":
+                df = pd.read_parquet(path)
+            else:
+                df = pd.read_csv(path, parse_dates=["pickup_hour"])
+            df["pickup_hour"] = pd.to_datetime(df["pickup_hour"])
+            df = df.drop_duplicates(subset=["pickup_hour"]).reset_index(drop=True)
+            _weather_cache = df
+            return _weather_cache
+
+    # If neither exists and config specifies raw_weather, download it
+    raw_path = project_root / (cfg["paths"]["raw_weather"] if cfg else "data/raw/weather_nyc_2016.csv")
+    print(f"[weather] Weather data not found. Downloading to {raw_path} ...")
+    df = download_weather(raw_path)
+    _weather_cache = df
+    return _weather_cache
 
 
 # ---------------------------------------------------------------------------
 # Inference helper: join weather for a series of datetimes
 # ---------------------------------------------------------------------------
 
-def get_weather(datetimes: pd.Series, cfg: dict) -> pd.DataFrame:
+def get_weather(datetimes: pd.Series, cfg: dict | None = None) -> pd.DataFrame:
     """
     Return weather features aligned to the given datetimes.
-
-    Strategy
-    --------
-    - Round each datetime down to the hour.
-    - Look up in the downloaded hourly table (dataset range).
-    - For hours outside the dataset, fall back to the (hour-of-day, month)
-      median computed from the training data.
-
-    Parameters
-    ----------
-    datetimes : pd.Series of datetime64 values (pickup_datetime)
-    cfg       : full config.yaml dict
-
-    Returns
-    -------
-    DataFrame with columns temperature_2m, precipitation, wind_speed_10m,
-    same length and index as datetimes.
+    Purely vectorised with no Python loops.
     """
+    global _medians_cache
     weather_df = load_weather(cfg)
-    weather_df["pickup_hour"] = pd.to_datetime(weather_df["pickup_hour"])
-    weather_df = weather_df.drop_duplicates(subset=["pickup_hour"])
 
-    # Compute (hour, month) medians as fallback
-    w_calc = weather_df.copy()
-    w_calc["hour"]  = w_calc["pickup_hour"].dt.hour
-    w_calc["month"] = w_calc["pickup_hour"].dt.month
-    medians = (
-        w_calc.groupby(["month", "hour"])[WEATHER_VARS]
-        .median()
-    )
-    global_medians = weather_df[WEATHER_VARS].median()
+    if _medians_cache is None:
+        w_calc = weather_df.copy()
+        w_calc["hour"]  = w_calc["pickup_hour"].dt.hour
+        w_calc["month"] = w_calc["pickup_hour"].dt.month
+        medians = w_calc.groupby(["month", "hour"])[WEATHER_VARS].median()
+        global_medians = weather_df[WEATHER_VARS].median()
+        _medians_cache = (medians, global_medians)
+    else:
+        medians, global_medians = _medians_cache
 
-    # Create lookup frame preserving original index
+    pickup_hours = datetimes.dt.floor("h")
+
+    # Fast path: all datetimes share the same hour (common in route matrix inference)
+    if len(pickup_hours) > 0 and (pickup_hours.iloc[0] == pickup_hours).all():
+        single_h = pickup_hours.iloc[0]
+        match = weather_df[weather_df["pickup_hour"] == single_h]
+        if not match.empty:
+            vals = match[WEATHER_VARS].values[0]
+        else:
+            key = (single_h.month, single_h.hour)
+            if key in medians.index:
+                vals = medians.loc[key].values
+            else:
+                vals = global_medians.values
+
+        # Broadcast vectorised across all rows
+        broadcasted = np.tile(vals, (len(datetimes), 1))
+        return pd.DataFrame(broadcasted, columns=WEATHER_VARS, index=datetimes.index)
+
+    # General path: multiple distinct datetimes (vectorised merge, no Python loops)
     query_df = pd.DataFrame({
-        "pickup_hour": datetimes.dt.floor("h"),
+        "pickup_hour": pickup_hours,
         "month": datetimes.dt.month,
         "hour": datetimes.dt.hour,
     }, index=datetimes.index)
@@ -144,7 +179,6 @@ def get_weather(datetimes: pd.Series, cfg: dict) -> pd.DataFrame:
     )
     merged.index = query_df.index
 
-    # Check for missing values to apply fallback
     if merged[WEATHER_VARS].isna().any().any():
         fallback = query_df[["month", "hour"]].merge(
             medians.reset_index(),
@@ -152,10 +186,10 @@ def get_weather(datetimes: pd.Series, cfg: dict) -> pd.DataFrame:
             how="left"
         )
         fallback.index = query_df.index
-        for var in WEATHER_VARS:
-            merged[var] = merged[var].fillna(fallback[var]).fillna(global_medians[var])
+        merged[WEATHER_VARS] = merged[WEATHER_VARS].fillna(fallback[WEATHER_VARS]).fillna(global_medians)
 
     return merged[WEATHER_VARS]
+
 
 
 # ---------------------------------------------------------------------------

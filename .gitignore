@@ -8,5 +8,6 @@ data/processed/*
 mlruns/
 mlflow.db
 *.joblib
+!models/artifacts/*.joblib
 .ipynb_checkpoints/
 .env
