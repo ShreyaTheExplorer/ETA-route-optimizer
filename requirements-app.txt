@@ -1,0 +1,8 @@
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+pydantic==2.9.2
+httpx==0.27.2
+streamlit==1.40.2
+folium==0.18.0
+streamlit-folium==0.23.1
+requests==2.32.3
