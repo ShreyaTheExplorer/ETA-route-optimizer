@@ -211,6 +211,27 @@ if __name__ == "__main__":
         print(exc, file=sys.stderr)
         sys.exit(1)
 
+    # Also save runtime artifacts to models/artifacts/ for inference & Docker
+    artifacts_dir = project_root / "models" / "artifacts"
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(artifacts_dir / "weather_hourly.parquet", index=False)
+    df.to_csv(artifacts_dir / "weather_nyc_2016.csv", index=False)
+
+    import json
+    w_calc = df.copy()
+    w_calc["hour"] = w_calc["pickup_hour"].dt.hour
+    w_calc["month"] = w_calc["pickup_hour"].dt.month
+    medians = w_calc.groupby(["month", "hour"])[WEATHER_VARS].median()
+    global_medians = df[WEATHER_VARS].median().to_dict()
+    medians_dict = {
+        "by_month_hour": {f"{m}_{h}": row.to_dict() for (m, h), row in medians.iterrows()},
+        "global": global_medians,
+    }
+    with open(artifacts_dir / "weather_medians.json", "w") as fh:
+        json.dump(medians_dict, fh, indent=2)
+
+    print(f"[weather] Runtime artifacts written to {artifacts_dir}")
     print(df.head())
     print(f"\n[weather] Done. Shape: {df.shape}")
+
 
