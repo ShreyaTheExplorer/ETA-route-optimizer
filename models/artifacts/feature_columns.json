@@ -1,0 +1,17 @@
+[
+  "haversine_km",
+  "manhattan_km",
+  "bearing",
+  "hour",
+  "weekday",
+  "month",
+  "is_weekend",
+  "is_rush_hour",
+  "hour_sin",
+  "hour_cos",
+  "pickup_zone",
+  "dropoff_zone",
+  "temperature_2m",
+  "precipitation",
+  "wind_speed_10m"
+]

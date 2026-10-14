@@ -1,0 +1,35 @@
+# Single source of truth for Block 1. Agents must read paths/params from here, not hardcode.
+paths:
+  raw_trips: data/raw/train.csv                 # Kaggle "NYC Taxi Trip Duration" (has lat/lon + duration)
+  raw_weather: data/raw/weather_nyc_2016.csv    # hourly weather (Open-Meteo download script writes this)
+  clean_trips: data/processed/trips_clean.parquet
+  features: data/processed/features.parquet
+  zone_model: models/artifacts/zone_kmeans.joblib
+  best_model: models/artifacts/best_eta_model.joblib
+  feature_list: models/artifacts/feature_columns.json
+
+cleaning:
+  # NYC bounding box (drops GPS junk / out-of-city)
+  lat_min: 40.55
+  lat_max: 40.92
+  lon_min: -74.27
+  lon_max: -73.68
+  min_duration_min: 1
+  max_duration_min: 120
+  min_distance_km: 0.1
+  max_speed_kmh: 100        # drop physically impossible rows
+  max_passengers: 6
+
+features:
+  n_zones: 30               # KMeans clusters over pickup+dropoff coords = "zones"
+  rush_hours: [7, 8, 9, 16, 17, 18, 19]
+
+training:
+  sample_rows: 300000       # use full data only if time allows
+  test_size: 0.2
+  random_state: 42
+  target: duration_min
+
+mlflow:
+  tracking_uri: sqlite:///mlflow.db
+  experiment_name: eta-prediction
