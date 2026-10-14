@@ -7,6 +7,8 @@ paths:
   zone_model: models/artifacts/zone_kmeans.joblib
   best_model: models/artifacts/best_eta_model.joblib
   feature_list: models/artifacts/feature_columns.json
+  weather_artifact: models/artifacts/weather_hourly.parquet
+  weather_medians: models/artifacts/weather_medians.json
 
 cleaning:
   # NYC bounding box (drops GPS junk / out-of-city)

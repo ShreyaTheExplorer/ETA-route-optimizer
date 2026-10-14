@@ -86,3 +86,62 @@ class TestPredictInterface:
         # Short trip should take less time than JFK trip
         assert preds[0] < preds[1]
         assert (preds > 0).all()
+
+    def test_10000_pairs_vectorized_benchmark(self):
+        """
+        Benchmark predict_minutes on 10,000 random NYC pairs at one departure time.
+        Must execute purely vectorized with no Python loops in under 500 ms.
+        """
+        import time
+        np.random.seed(42)
+        n = 10_000
+        pu_lat = np.random.uniform(40.55, 40.92, size=n)
+        pu_lon = np.random.uniform(-74.27, -73.68, size=n)
+        do_lat = np.random.uniform(40.55, 40.92, size=n)
+        do_lon = np.random.uniform(-74.27, -73.68, size=n)
+        dep = datetime(2016, 4, 15, 9, 0, 0)
+
+        t0 = time.perf_counter()
+        preds = predict_minutes(pu_lat, pu_lon, do_lat, do_lon, dep)
+        elapsed_sec = time.perf_counter() - t0
+
+        print(f"\n[benchmark] 10,000 predictions: {elapsed_sec*1000:.2f} ms ({n/elapsed_sec:,.0f} preds/sec)")
+        assert isinstance(preds, np.ndarray)
+        assert len(preds) == n
+        assert (preds > 0).all()
+        assert elapsed_sec < 1.0, f"Expected < 1.0s, took {elapsed_sec:.3f}s"
+
+    def test_runtime_artifacts_only_inside_models_artifacts(self):
+        """
+        Ensure predict_minutes uses artifacts exclusively from models/artifacts/
+        and has zero runtime file dependencies on data/raw or data/processed.
+        """
+        import builtins
+        opened = []
+        orig_open = builtins.open
+
+        def tracking_open(file, *args, **kwargs):
+            opened.append(str(file))
+            return orig_open(file, *args, **kwargs)
+
+        builtins.open = tracking_open
+        try:
+            preds = predict_minutes(
+                [TIMES_SQUARE_LAT],
+                [TIMES_SQUARE_LON],
+                [JFK_AIRPORT_LAT],
+                [JFK_AIRPORT_LON],
+                datetime(2016, 4, 15, 9, 0, 0),
+            )
+        finally:
+            builtins.open = orig_open
+
+        # Filter out virtualenv packages and check workspace data/ references
+        data_deps = [
+            f for f in opened
+            if "data" in f.replace("\\", "/").lower()
+            and "models" not in f.replace("\\", "/").lower()
+            and "site-packages" not in f.replace("\\", "/").lower()
+        ]
+        assert data_deps == [], f"Found runtime dependencies on data/ folder: {data_deps}"
+

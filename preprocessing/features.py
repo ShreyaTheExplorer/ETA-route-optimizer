@@ -198,26 +198,22 @@ def build_features(
     pu_centroids = zone_model.cluster_centers_[:, :2]  # (n_zones, 2)
     do_centroids = zone_model.cluster_centers_[:, 2:]  # (n_zones, 2)
 
-    def _assign_zone(points: np.ndarray, centroids: np.ndarray, chunk_size: int = 100_000) -> np.ndarray:
-        """Nearest centroid (L2) for each row in points using chunked cdist."""
+    def _assign_zone(points: np.ndarray, centroids: np.ndarray) -> np.ndarray:
+        """Nearest centroid (L2) using scipy cdist (vectorised in C, zero Python loops)."""
         from scipy.spatial.distance import cdist
-        labels = np.empty(len(points), dtype=np.int32)
-        for i in range(0, len(points), chunk_size):
-            chunk = points[i : i + chunk_size]
-            labels[i : i + chunk_size] = cdist(chunk, centroids).argmin(axis=1)
-        return labels
+        return cdist(points, centroids, metric="sqeuclidean").argmin(axis=1).astype(np.int32)
 
     df["pickup_zone"]  = _assign_zone(pickup_coords,  pu_centroids)
     df["dropoff_zone"] = _assign_zone(dropoff_coords, do_centroids)
 
     # ------------------------------------------------------------------
-    # 4. Weather features
+    # 4. Weather features (purely vectorised)
     # ------------------------------------------------------------------
     weather = get_weather(df["pickup_datetime"], cfg)
-    for col in ["temperature_2m", "precipitation", "wind_speed_10m"]:
-        df[col] = weather[col].values
+    df[["temperature_2m", "precipitation", "wind_speed_10m"]] = weather[["temperature_2m", "precipitation", "wind_speed_10m"]].values
 
     return df, zone_model
+
 
 
 # ---------------------------------------------------------------------------

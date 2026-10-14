@@ -112,11 +112,12 @@ def predict_minutes(
     d_lon = np.atleast_1d(dropoff_lon).astype(float)
 
     if isinstance(departure, (datetime, str, pd.Timestamp)):
-        dep_arr = np.array([departure] * len(p_lat))
+        dep_arr = np.repeat(np.datetime64(pd.Timestamp(departure)), len(p_lat))
     else:
         dep_arr = np.atleast_1d(departure)
         if len(dep_arr) == 1 and len(p_lat) > 1:
             dep_arr = np.repeat(dep_arr, len(p_lat))
+
 
     if not (len(p_lat) == len(p_lon) == len(d_lat) == len(d_lon) == len(dep_arr)):
         raise ValueError(
