@@ -1,59 +1,134 @@
-# Data Cleaning Report
+        # Data Cleaning Report – Food Delivery Dataset
 
-**Generated:** 2026-10-14 23:25 UTC
-**Source:** `data/raw/train.csv`
-**Output:** `data/processed/trips_clean.parquet`
+        **Generated:** 2026-10-23 16:41 UTC
+        **Source:** `data/raw/train.csv`
+        **Output:** `data/processed/cleaned.csv`
 
----
+        ---
 
-## Summary
+        ## Summary
 
-| Metric | Count |
-|--------|-------|
-| Rows before cleaning | 1,458,644 |
-| Rows after cleaning  | 1,439,246 |
-| **Total dropped**    | **19,398** |
-| Retention rate       | 98.67 % |
+        | Metric | Count |
+        |--------|-------|
+        | Rows before cleaning | 45,593 |
+        | Rows after cleaning  | 39,909 |
+        | **Total dropped**    | **5,684** |
+        | Retention rate       | 87.53 % |
+        | Final shape          | 39,909 rows × 22 cols |
 
----
+        ---
 
-## Drop Breakdown (per rule)
+        ## Drop Breakdown (per rule)
 
-| Rule | Rows Dropped | % of Raw |
-|------|-------------|---------|
-| Nulls | 0  (0.00 %) |
-| Exact duplicates | 0  (0.00 %) |
-| Zero / near-zero distance (< 0.1 km) | 13,318  (0.91 %) |
-| Outside NYC bounding box | 999  (0.07 %) |
-| Trip duration outside [1, 120] min | 5,034  (0.35 %) |
-| Impossible speed (> 100 km/h) | 34  (0.00 %) |
-| Invalid passenger count (0 or > 6) | 13  (0.00 %) |
+        | Rule | Rows dropped | % of raw |
+        |------|-------------|---------|
+        | Exact duplicate rows          | 0  (0.00 %) |
+        | Duplicate IDs                 | 0  (0.00 %) |
+        | Missing required cols (Time_Orderd / traffic / weather) | 1,731  (3.80 %) |
+        | Outside India bbox (lat 6.0–37.0, lon 68.0–98.0) | 3,665  (8.04 %) |
+        | Distance < 0.1 km or > 25.0 km | 0  (0.00 %) |
+        | Implied speed > 80.0 km/h | 288  (0.63 %) |
 
----
+        ---
 
-## Cleaning Rules Applied
+        ## Value Clamping (set to NaN, rows kept)
 
-| Parameter | Value |
-|-----------|-------|
-| NYC lat range | [40.55, 40.92] |
-| NYC lon range | [-74.27, -73.68] |
-| Min duration (min) | 1 |
-| Max duration (min) | 120 |
-| Min distance (km)  | 0.1 |
-| Max speed (km/h)   | 100 |
-| Max passengers     | 6 |
+        | Column | Count set to NaN |
+        |--------|-----------------|
+        | Age outside [18, 70] | 38 |
+        | Ratings outside [1.0, 5.0] | 53 |
 
----
+        ---
 
-## Notes
+        ## Missingness Before Cleaning
 
-- **Zero-distance trips:** Trips with haversine distance < 0.1 km are
-  treated as GPS glitches or test rides and dropped.
-- **Long trips:** Trips exceeding 120 minutes (2 hours) are likely
-  data errors or very rare outliers; excluded to keep the model focused on realistic
-  urban trips.
-- **Outside NYC:** Both pickup AND dropoff must be within the bounding box
-  lat in [40.55, 40.92], lon in [-74.27, -73.68].
-- **Impossible speeds:** Implied speed = distance_km / (duration_min / 60).
-  Values > 100 km/h are physically impossible for NYC traffic and
-  indicate GPS or timestamp errors.
+        | Column | Null count |
+        |--------|-----------|
+        | `Delivery_person_Age` | 1,854 |
+| `Delivery_person_Ratings` | 1,908 |
+| `Time_Orderd` | 1,731 |
+| `Weatherconditions` | 616 |
+| `Road_traffic_density` | 601 |
+| `multiple_deliveries` | 993 |
+| `Festival` | 228 |
+| `City` | 1,200 |
+
+        ---
+
+        ## Missingness After Cleaning
+
+        | Column | Null count |
+        |--------|-----------|
+        | `Delivery_person_Age` | 200 |
+| `Delivery_person_Ratings` | 239 |
+
+        *(Only Age and Ratings are permitted to have NaN after cleaning.)*
+
+        ---
+
+        ## Vehicle Category Counts (after cleaning)
+
+        | Vehicle | Count |
+        |---------|-------|
+        | `motorcycle` | 23,445 |
+| `scooter` | 13,311 |
+| `electric_scooter` | 3,153 |
+
+        > **Note:** `bicycle` is a rare but valid category (≈68 rows in raw data).
+        > Feature encoders in `preprocessing/features.py` use `handle_unknown='use_encoded_value'`
+        > (scikit-learn OrdinalEncoder) to handle unseen categories at inference time.
+
+        ---
+
+        ## Cleaning Thresholds Applied
+
+        | Parameter | Value |
+        |-----------|-------|
+        | India lat range | [6.0, 37.0] |
+        | India lon range | [68.0, 98.0] |
+        | Min distance (km) | 0.1 |
+        | Max distance (km) | 25.0 |
+        | Max implied speed (km/h) | 80.0 |
+        | Time_taken_min range | [10, 54] |
+        | Age valid range | [18, 70] |
+        | Ratings valid range | [1.0, 5.0] |
+
+        ---
+
+        ## Final Columns
+
+        ```
+          ID
+  Delivery_person_ID
+  Delivery_person_Age
+  Delivery_person_Ratings
+  Restaurant_latitude
+  Restaurant_longitude
+  Delivery_location_latitude
+  Delivery_location_longitude
+  Order_Date
+  Time_Orderd
+  Weatherconditions
+  Road_traffic_density
+  Vehicle_condition
+  Type_of_order
+  Type_of_vehicle
+  multiple_deliveries
+  Festival
+  Time_taken_min
+  ordered_at
+  city
+  distance_km
+  implied_speed_kmh
+        ```
+
+        ---
+
+        ## Limitations
+
+        - The dataset contains delivery *legs*, not full multi-stop routes.
+          Stops used in the optimizer are sampled points; legs are predicted by the ETA model.
+        - NYC Taxi distance/speed norms do not apply here; India bounding box and
+          80 km/h road-speed cap are used instead.
+        - Age and Ratings are nullable (set to NaN if out of range); the ETA model
+          must handle missingness in these columns (median imputation recommended).

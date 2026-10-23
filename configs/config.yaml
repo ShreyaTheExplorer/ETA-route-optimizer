@@ -1,37 +1,94 @@
 # Single source of truth for Block 1. Agents must read paths/params from here, not hardcode.
+# ============================================================
+#  BLOCK 1 - shared config (data, features, training, mlflow)
+# ============================================================
+
+seed: 42   # fixed seed used everywhere in Block 1
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
 paths:
-  raw_trips: data/raw/train.csv                 # Kaggle "NYC Taxi Trip Duration" (has lat/lon + duration)
-  raw_weather: data/raw/weather_nyc_2016.csv    # hourly weather (Open-Meteo download script writes this)
-  clean_trips: data/processed/trips_clean.parquet
-  features: data/processed/features.parquet
-  zone_model: models/artifacts/zone_kmeans.joblib
-  best_model: models/artifacts/best_eta_model.joblib
-  feature_list: models/artifacts/feature_columns.json
-  weather_artifact: models/artifacts/weather_hourly.parquet
-  weather_medians: models/artifacts/weather_medians.json
+  # --- food-delivery dataset (active) ---
+  raw_trips:          data/raw/train.csv
+  clean_trips:        data/processed/cleaned.csv
 
+  # --- feature / model artefacts ---
+  features:           data/processed/features.parquet
+  zone_model:         models/artifacts/zone_kmeans.joblib
+  best_model:         models/artifacts/best_eta_model.joblib
+  feature_list:       models/artifacts/feature_columns.json
+  label_encoders:     models/artifacts/label_encoders.joblib
+
+  # --- legacy NYC-taxi paths (kept for history; not used in food-delivery branch) ---
+  raw_weather:        data/raw/weather_nyc_2016.csv
+  weather_artifact:   models/artifacts/weather_hourly.parquet
+  weather_medians:    models/artifacts/weather_medians.json
+
+# ---------------------------------------------------------------------------
+# Cleaning thresholds - food delivery dataset
+# ---------------------------------------------------------------------------
 cleaning:
-  # NYC bounding box (drops GPS junk / out-of-city)
-  lat_min: 40.55
-  lat_max: 40.92
-  lon_min: -74.27
-  lon_max: -73.68
-  min_duration_min: 1
-  max_duration_min: 120
-  min_distance_km: 0.1
-  max_speed_kmh: 100        # drop physically impossible rows
-  max_passengers: 6
+  # India bounding box (drops 0 / negative GPS junk and non-India coords)
+  lat_min:  6.0
+  lat_max: 37.0
+  lon_min: 68.0
+  lon_max: 98.0
 
+  # Haversine distance gates (km)
+  min_distance_km:  0.1
+  max_distance_km: 25.0
+
+  # Implied speed gate (km/h) - flag then drop above this
+  max_speed_kmh: 80.0
+
+  # Delivery-time range to keep (minutes) - stated range in dataset is 10-54
+  min_time_min: 10
+  max_time_min: 54
+
+  # Rider age valid range
+  age_min: 18
+  age_max: 70
+
+  # Rider ratings valid range
+  rating_min: 1.0
+  rating_max: 5.0
+
+  # String sentinel values that should become real NaN
+  nan_strings:
+    - "NaN"
+    - "nan"
+    - ""
+
+  # Columns whose NaN -> "unknown" (not dropped)
+  fill_unknown_cols:
+    - multiple_deliveries
+    - Festival
+
+  # Columns that must NOT be NaN (rows are dropped if they are)
+  required_cols:
+    - Time_Orderd
+    - Road_traffic_density
+    - Weatherconditions
+
+# ---------------------------------------------------------------------------
+# Feature engineering
+# ---------------------------------------------------------------------------
 features:
-  n_zones: 30               # KMeans clusters over pickup+dropoff coords = "zones"
+  n_zones: 30               # KMeans clusters over pickup+dropoff coords
   rush_hours: [7, 8, 9, 16, 17, 18, 19]
 
+# ---------------------------------------------------------------------------
+# Training
+# ---------------------------------------------------------------------------
 training:
-  sample_rows: 300000       # use full data only if time allows
   test_size: 0.2
-  random_state: 42
-  target: duration_min
+  random_state: 42          # always equals seed above
+  target: Time_taken_min    # cleaned column name
 
+# ---------------------------------------------------------------------------
+# MLflow
+# ---------------------------------------------------------------------------
 mlflow:
   tracking_uri: sqlite:///mlflow.db
-  experiment_name: eta-prediction
+  experiment_name: eta-food-delivery
