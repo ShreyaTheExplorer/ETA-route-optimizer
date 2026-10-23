@@ -1,7 +1,9 @@
 # Interface contracts (agreed in Stage 0; change only by team agreement)
 
+
+
 ## 1. ETA function (owner: A, file models/predict.py)
-predict_minutes(pickup_lat, pickup_lon, dropoff_lat, dropoff_lon, departure: datetime) -> np.ndarray
+predict_minutes(pickup_lat, pickup_lon, dropoff_lat, dropoff_lon, departure,*, traffic="Medium", weather="Sunny", festival=False, multiple_deliveries=0, vehicle="motorcycle", rider_age=None, rider_rating=None) -> float   # minutes
 - Accepts scalars or equal-length arrays. Returns predicted duration in MINUTES. Must be vectorised.
 
 ## 2. Time matrix (builder owner: B in api/matrix_builder.py; plain version: C in optimizer/graph.py)
